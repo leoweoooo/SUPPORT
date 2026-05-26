@@ -1,66 +1,76 @@
 import os
-os.environ['KMP_DUPLICATE_LIB_OK']='True'
+
+os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 import sys
+
 sys.path.append(".")
+import datetime
+import time
 from turtle import update
+
+import numpy as np
+import PyQt5.QtGui as QtGui
+import tifffile
+import torch
+from PIL import Image
+from PyQt5 import QtWidgets
+from PyQt5.QtCore import QSize, Qt, QThread, pyqtSignal
+from PyQt5.QtGui import QColor, QIcon, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
-    QMainWindow,
-    QTextEdit,
-    QLineEdit,
+    QComboBox,
     QFileDialog,
-    QMessageBox,
-    QProgressBar,
-    QVBoxLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QProgressBar,
     QPushButton,
-    QGridLayout,
+    QTextEdit,
+    QVBoxLayout,
     QWidget,
-    QComboBox
 )
-import PyQt5.QtGui as QtGui
-from PyQt5.QtGui import QIcon, QPixmap, QColor
-from PyQt5.QtCore import QThread, pyqtSignal, Qt, QSize
-import torch
-import time
-import datetime
-import numpy as np
-from PIL import Image
-from tifffile import TiffFile
-import tifffile
 from src.utils.dataset_pyqt import DatasetSupport_test_stitch
+from tifffile import TiffFile
 
 from model.SUPPORT import SUPPORT
 
 
-from PyQt5 import QtWidgets
-
 class QHSeperationLine(QtWidgets.QFrame):
-    '''
+    """
     a horizontal seperation line\n
-    '''
+    """
+
     def __init__(self):
         super().__init__()
         self.setMinimumWidth(1)
         self.setFixedHeight(20)
         self.setFrameShape(QtWidgets.QFrame.HLine)
         self.setFrameShadow(QtWidgets.QFrame.Sunken)
-        self.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Minimum)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Minimum
+        )
         return
 
+
 class QVSeperationLine(QtWidgets.QFrame):
-    '''
+    """
     a vertical seperation line\n
-    '''
+    """
+
     def __init__(self):
         super().__init__()
         self.setFixedWidth(20)
         self.setMinimumHeight(1)
         self.setFrameShape(QtWidgets.QFrame.VLine)
         self.setFrameShadow(QtWidgets.QFrame.Sunken)
-        self.setSizePolicy(QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Preferred)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Preferred
+        )
         return
+
 
 def convert_nparray_to_QPixmap(img):
     _, _, ch = img.shape
@@ -78,8 +88,10 @@ def convert_nparray_to_QPixmap(img):
 
     return qpixmap
 
+
 class modelThread(QThread):
     finish_loading = pyqtSignal(int)
+
     def __init__(self, parent):
         super().__init__(parent)
         self.parent = parent
@@ -97,7 +109,7 @@ class modelThread(QThread):
                     last_layer_channels=[64, 32, 16],
                     bs_size=self.parent.bs_size,
                 )
-                
+
             if self._isRunning:
                 if self.parent.cuda:
                     model = model.cuda()
@@ -112,13 +124,14 @@ class modelThread(QThread):
                 model.load_state_dict(state)
 
             self.parent.model = model
-            
+
             self.finish_loading.emit(1)
 
     def stop(self):
         self._isRunning = False
         self.quit()
         # self.wait(1000)
+
 
 class runThread(QThread):
     signal_update_img = pyqtSignal(int)
@@ -151,8 +164,8 @@ class runThread(QThread):
 
         memmap_image = tifffile.memmap(
             f"{self.parent.save_header}/{metadata}/denoised.tif",
-            shape = self.parent.img_shape,
-            dtype="float32"
+            shape=self.parent.img_shape,
+            dtype="float32",
         )
 
         with torch.no_grad():
@@ -238,7 +251,6 @@ class runThread(QThread):
                         patch_start_h = int(single_coordinate["patch_start_h"][bi])
                         patch_end_h = int(single_coordinate["patch_end_h"][bi])
 
-
                         denoised_frame[
                             0,  # stack_start_s,
                             stack_start_h:stack_end_h,
@@ -258,7 +270,7 @@ class runThread(QThread):
 
                 if ti == self.parent.actual_start_idx - 1:
                     vmin = np.min(disp_raw)
-                    vmax = np.percentile(disp_raw, q=99) # np.max(disp_raw)
+                    vmax = np.percentile(disp_raw, q=99)  # np.max(disp_raw)
 
                 self.parent.disp_raw = np.clip(
                     1.2 * (disp_raw - vmin) / (vmax - vmin), 0, 1
@@ -271,23 +283,23 @@ class runThread(QThread):
                 self.progressbar_update.emit(1)
 
                 memmap_image[ti, :, :] = denoised_frame
-                
+
                 # if ti == self.parent.actual_start_idx - 1:
-                    # tifffile.imwrite(
-                    #     f"{self.parent.save_header}/{metadata}/denoised.tif",
-                    #     denoised_frame,
-                    #     dtype="float32",
-                    #     metadata={'axes': 'TYX', 'imagej_metadata': self.parent.imagej_metadata, }
-                    # )
+                # tifffile.imwrite(
+                #     f"{self.parent.save_header}/{metadata}/denoised.tif",
+                #     denoised_frame,
+                #     dtype="float32",
+                #     metadata={'axes': 'TYX', 'imagej_metadata': self.parent.imagej_metadata, }
+                # )
                 # else:
-                    # tifffile.imwrite(
-                    #     f"{self.parent.save_header}/{metadata}/denoised.tif",
-                    #     denoised_frame,
-                    #     append=True,
-                    #     dtype="float32",
-                    #     metadata={'axes': 'TYX', 'imagej_metadata': self.parent.imagej_metadata}
-                    # )
-            
+                # tifffile.imwrite(
+                #     f"{self.parent.save_header}/{metadata}/denoised.tif",
+                #     denoised_frame,
+                #     append=True,
+                #     dtype="float32",
+                #     metadata={'axes': 'TYX', 'imagej_metadata': self.parent.imagej_metadata}
+                # )
+
             memmap_image.flush()
             del memmap_image
 
@@ -367,11 +379,13 @@ class SUPPORTGUI(QMainWindow):
         Layout_model.addWidget(self.Combo_cpu, 1, 4, 1, 1)
 
         Layout_model.addWidget(QHSeperationLine(), 2, 0, 1, 5)
-        
+
         Layout_load_model = QGridLayout()
         self.Label_custom_model = QLabel("Load custom model")
         self.Label_custom_model.setMaximumWidth(250)
-        self.Label_custom_model.setStyleSheet("background-color: #FFFFFF; color: #444444")
+        self.Label_custom_model.setStyleSheet(
+            "background-color: #FFFFFF; color: #444444"
+        )
         Layout_load_model.addWidget(self.Label_custom_model, 0, 0, 1, 3)
 
         browse_icon = QIcon("./src/GUI/icons/browse.png")
@@ -487,7 +501,7 @@ class SUPPORTGUI(QMainWindow):
             self.cuda = False
             cuda_available = "torch.CUDA is unavailable. Will not use GPU!"
             self.Combo_cpu.setCurrentText("CPU")
-        
+
         self.modelThr = None
         self.custom_model = False
         self.set_model_path("1")
@@ -541,18 +555,20 @@ class SUPPORTGUI(QMainWindow):
             self.model_path = None
             self.bs_size = 5
         self.update_model_info()
-        
+
         self.modelThr = modelThread(self)
         self.start_model_loading()
         self.modelThr.finish_loading.connect(self.finish_model_loading)
         self.modelThr.start()
-    
+
     def update_model_info(self):
         device = "GPU" if self.cuda else "CPU"
-        custom_flag = "[CUSTOM MODEL, auto selecting bs_size] " if self.custom_model else ""
+        custom_flag = (
+            "[CUSTOM MODEL, auto selecting bs_size] " if self.custom_model else ""
+        )
         self.Text_model_info.setText(
-                f"{custom_flag} Blind spot size {self.bs_size} selected.\nModel path : {self.model_path}\n\nWill be run on {device}.\n\n\nYou can use custom model rather than built-ins.\nUse browse button to select custom model."
-            )
+            f"{custom_flag} Blind spot size {self.bs_size} selected.\nModel path : {self.model_path}\n\nWill be run on {device}.\n\n\nYou can use custom model rather than built-ins.\nUse browse button to select custom model."
+        )
 
     def warning(self, message):
         QMessageBox.warning(self, "Warning", message)
@@ -658,9 +674,7 @@ class SUPPORTGUI(QMainWindow):
         # if os.path.isdir(fname):
         #     pass
         self.save_header = fname
-        self.savepath_path.setText(
-                f"{self.save_header}/YYYYMMDD_HHMMSS/denoised.tif"
-            )
+        self.savepath_path.setText(f"{self.save_header}/YYYYMMDD_HHMMSS/denoised.tif")
         self.Text_save.setText(
             f"Save as : {self.save_header}/YYYYMMDD_HHMMSS/denoised.tif"
         )
@@ -679,9 +693,10 @@ class SUPPORTGUI(QMainWindow):
             pass
             # self.Text_log.append("Enter integer for final index.")
 
-
     def browse_model(self):
-        fname = QFileDialog.getOpenFileName(self, "(Load image) Open .pt or .pth file", "./")
+        fname = QFileDialog.getOpenFileName(
+            self, "(Load image) Open .pt or .pth file", "./"
+        )
         if fname[0].split(".")[-1] not in ["pt", "pth"]:
             self.warning("Select .pt or .pth file!")
             return True
@@ -690,7 +705,7 @@ class SUPPORTGUI(QMainWindow):
                 self.custom_model = True
                 self.Label_custom_model.setText(fname[0])
                 self.model_path = fname[0]
-                
+
                 state = torch.load(fname[0])
                 blind_conv_channels = state["blind_convs3x3.0.weight"].size(0)
                 out_conv0_channels = state["out_convs.0.weight"].size(1)
@@ -703,32 +718,35 @@ class SUPPORTGUI(QMainWindow):
                         depth5 += 1
                 depth3 = depth3 // 3
                 depth5 = depth5 // 3
-                
+
                 if (depth3 + depth5) == 2:
-                    self.Text_log.append(f"[Warning] Model ambiguity in loading custom model. Please check the model.")
+                    self.Text_log.append(
+                        f"[Warning] Model ambiguity in loading custom model. Please check the model."
+                    )
 
                 if out_conv0_channels == 2 * blind_conv_channels:
                     self.bs_size = 3
-                    self.Text_log.append(f"[Warning] Automatically set as bs_size = 3. Please check if it is right.")
-                
+                    self.Text_log.append(
+                        f"[Warning] Automatically set as bs_size = 3. Please check if it is right."
+                    )
+
                 if out_conv0_channels == (depth3 + depth5) * blind_conv_channels:
                     self.bs_size = 1
-                    self.Text_log.append(f"[Warning] Automatically set as bs_size = 1. Please check if it is right.")
-                
+                    self.Text_log.append(
+                        f"[Warning] Automatically set as bs_size = 1. Please check if it is right."
+                    )
+
                 self.update_model_info()
 
                 self.modelThr = modelThread(self)
                 self.start_model_loading()
                 self.modelThr.finish_loading.connect(self.finish_model_loading)
                 self.modelThr.start()
-    
+
             except:
                 self.Label_image.setText("[ERROR] Please check logs.")
                 self.img_path = None
-                self.Text_log.append(
-                    f"[ERROR]"
-                )
-
+                self.Text_log.append(f"[ERROR]")
 
     def browse_img(self):
         fname = QFileDialog.getOpenFileName(self, "(Load image) Open .tif file", "./")
