@@ -1,5 +1,6 @@
 import argparse
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import skimage.io as skio
@@ -79,6 +80,7 @@ class SupportTestArgs:
     patch_interval: list[int]
     batch_size: int
     bs_size: int
+    edge_mode: str
     bp: bool
 
 
@@ -105,6 +107,13 @@ def arg_parser() -> SupportTestArgs:
     )
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--bs-size", type=int, default=3)
+    parser.add_argument(
+        "--edge-mode",
+        type=str,
+        default=None,
+        choices=["repeat", "mirror"],
+        help="How to handle edge frames",
+    )
     parser.add_argument("--bp", action="store_true")
     ns = parser.parse_args()
     return SupportTestArgs(**vars(ns))
@@ -112,6 +121,8 @@ def arg_parser() -> SupportTestArgs:
 
 if __name__ == "__main__":
     args = arg_parser()
+
+    # load in the model
     model = SUPPORT(
         in_channels=args.patch_size[0],
         mid_channels=[16, 32, 64, 128, 256],
@@ -122,25 +133,64 @@ if __name__ == "__main__":
         bs_size=args.bs_size,
         bp=args.bp,
     ).cuda()
-
     model.load_state_dict(torch.load(args.model))
 
-    demo_tif = torch.from_numpy(skio.imread(args.data).astype(np.float32)).type(
-        torch.FloatTensor
-    )
+    # resolve input files
+    data_path = Path(args.data)
+    if data_path.is_dir():
+        data_files = list(data_path.rglob("*.tif"))
+    else:
+        data_files = [data_path]
 
-    testset = DatasetSUPPORT_test_stitch(
-        demo_tif, patch_size=args.patch_size, patch_interval=args.patch_interval
-    )
+    # resolve output files
+    output_path = Path(args.output)
+    if len(data_files) > 1:
+        output_path.mkdir(parents=True, exist_ok=True)
+        output_files = [output_path / f"denoised_{f.name}" for f in data_files]
+    else:
+        output_files = [output_path]
 
-    testloader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size)
-    denoised_stack = validate(testloader, model)
+    # print out a warning if an edge_mode is set.
+    if args.edge_mode in ["repeat", "mirror"]:
+        print(
+            'Warning. First and Last frame will be "processed", this is just workaround, not the ideal solution.'
+        )
 
-    print(denoised_stack.shape)
-    skio.imsave(
-        args.output,
-        denoised_stack[
-            (model.in_channels - 1) // 2 : -(model.in_channels - 1) // 2, :, :
-        ],
-        metadata={"axes": "TYX"},
-    )
+    for i, (data_file, output_file) in enumerate(zip(data_files, args.output)):
+        demo_tif = torch.from_numpy(skio.imread(data_file).astype(np.float32)).type(
+            torch.FloatTensor
+        )
+        if args.edge_mode == "repeat":
+            demo_tif = torch.cat(
+                [
+                    demo_tif[0, :, :]
+                    .unsqueeze(0)
+                    .repeat((args.patch_size[0] // 2, 1, 1)),
+                    demo_tif,
+                    demo_tif[-1, :, :]
+                    .unsqueeze(0)
+                    .repeat((args.patch_size[0] // 2, 1, 1)),
+                ]
+            )
+        elif args.edge_mode == "mirror":
+            demo_tif = torch.cat(
+                [
+                    demo_tif[1 : (args.patch_size[0] // 2) + 1, :, :].flip(0),
+                    demo_tif,
+                    demo_tif[-1 * (args.patch_size[0] // 2) - 1 : -1, :, :].flip(0),
+                ]
+            )
+
+        testset = DatasetSUPPORT_test_stitch(
+            demo_tif, patch_size=args.patch_size, patch_interval=args.patch_interval
+        )
+        testloader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size)
+        denoised_stack = validate(testloader, model)
+
+        if args.edge_mode in ["repeat", "mirror"]:
+            denoised_stack = denoised_stack[
+                args.patch_size[0] // 2 : -1 * (args.patch_size[0] // 2)
+            ]
+
+        print("Output: ", output_file, " shape: ", denoised_stack.shape)
+        skio.imsave(str(output_file), denoised_stack, metadata={"axes": "TYX"})
