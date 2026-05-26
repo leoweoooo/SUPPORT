@@ -1,4 +1,5 @@
 import argparse
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -122,6 +123,19 @@ def arg_parser() -> SupportTestArgs:
 if __name__ == "__main__":
     args = arg_parser()
 
+    # check if the training loop saved a metadata to load from.
+    metadata_path = Path(args.model).parent / "train_metadata.json"
+    if metadata_path.exists():
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+        # override args with training metadata
+        args.bs_size = metadata["bs_size"]
+        args.bp = metadata["bp"]
+        args.patch_size = metadata["patch_size"]
+        print(f"Loaded training metadata from {metadata_path}")
+    else:
+        print("Warning: no train_metadata.json found, using provided arguments.")
+
     # load in the model
     model = SUPPORT(
         in_channels=args.patch_size[0],
@@ -156,7 +170,7 @@ if __name__ == "__main__":
             'Warning. First and Last frame will be "processed", this is just workaround, not the ideal solution.'
         )
 
-    for i, (data_file, output_file) in enumerate(zip(data_files, args.output)):
+    for data_file, output_file in zip(data_files, output_files):
         demo_tif = torch.from_numpy(skio.imread(data_file).astype(np.float32)).type(
             torch.FloatTensor
         )
